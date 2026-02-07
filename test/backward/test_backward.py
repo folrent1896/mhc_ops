@@ -8,7 +8,7 @@ import torch
 import sys
 sys.path.insert(0, '..')
 
-from src.golden import mhc_forward_pre, mhc_pre_backward_manual
+from src.backward.golden import mhc_forward_pre, mhc_pre_backward_manual
 
 
 def test_backward_triton_vs_golden():
@@ -18,7 +18,7 @@ def test_backward_triton_vs_golden():
     print("=" * 70)
 
     try:
-        from src.mhc_backward_triton import mhc_backward_triton
+        from src.backward.mhc_backward_triton import mhc_backward_triton
         triton_available = True
     except ImportError as e:
         print(f"\n[WARNING] Triton not available: {e}")

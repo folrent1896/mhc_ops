@@ -1,3 +1,3 @@
 """
-Test package for MHC Forward Pre operator implementations.
+Test package for MHC Forward Pre operator.
 """

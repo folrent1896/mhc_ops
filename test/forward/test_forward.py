@@ -17,7 +17,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Import reference implementation
-from test.test_mhc_pre_grad import mhc_forward_pre
+from src.forward import mhc_forward_pre
 
 
 @dataclass
@@ -75,7 +75,7 @@ class MHCOperatorTester:
     def _load_triton(self):
         """Try to load Triton implementation."""
         try:
-            from src.mhc_forward_pre_triton import mhc_forward_pre_triton_optimized
+            from src.forward.mhc_forward_pre_triton import mhc_forward_pre_triton_optimized
             return mhc_forward_pre_triton_optimized
         except ImportError as e:
             print(f"WARNING: Could not import Triton implementation: {e}")
@@ -84,7 +84,7 @@ class MHCOperatorTester:
     def _load_tilelang(self):
         """Try to load TileLang implementation."""
         try:
-            from src.mhc_forward_pre_tilelang import mhc_forward_pre_tvm
+            from src.forward.mhc_forward_pre_tilelang import mhc_forward_pre_tvm
             # TileLang returns a compiled function, need wrapper
             def tilelang_wrapper(x, phi, alpha, bias, outflag=False, norm_eps=1e-6, hc_eps=1e-6):
                 B, S, n, D = x.shape

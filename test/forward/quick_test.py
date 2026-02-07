@@ -20,10 +20,10 @@ def quick_test_reference_vs_triton():
     print("=" * 70)
 
     # Import
-    from test_mhc_pre_grad import mhc_forward_pre as mhc_ref
+    from src.forward.golden import mhc_forward_pre as mhc_ref
 
     try:
-        from src.mhc_forward_pre_triton import mhc_forward_pre_triton_optimized as mhc_tri
+        from src.forward.mhc_forward_pre_triton import mhc_forward_pre_triton_optimized as mhc_tri
         triton_available = True
     except ImportError as e:
         print(f"\n[WARNING] Triton not available: {e}")
@@ -115,10 +115,10 @@ def quick_test_multiple_configs():
     print("Testing Multiple Configurations")
     print("=" * 70)
 
-    from test_mhc_pre_grad import mhc_forward_pre as mhc_ref
+    from src.forward.golden import mhc_forward_pre as mhc_ref
 
     try:
-        from src.mhc_forward_pre_triton import mhc_forward_pre_triton_optimized as mhc_tri
+        from src.forward.mhc_forward_pre_triton import mhc_forward_pre_triton_optimized as mhc_tri
     except ImportError:
         print("Triton not available, skipping...")
         return
@@ -182,10 +182,10 @@ def test_functional_correctness():
     print("Functional Correctness Test (Detailed)")
     print("=" * 70)
 
-    from test_mhc_pre_grad import mhc_forward_pre as mhc_ref
+    from src.forward.golden import mhc_forward_pre as mhc_ref
 
     try:
-        from src.mhc_forward_pre_triton import mhc_forward_pre_triton_optimized as mhc_tri
+        from src.forward.mhc_forward_pre_triton import mhc_forward_pre_triton_optimized as mhc_tri
     except ImportError:
         print("Triton not available, skipping...")
         return
