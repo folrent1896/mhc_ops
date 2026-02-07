@@ -79,7 +79,7 @@ Speedup: 2.70x ✓ PASS
 
 - 阅读完整文档: `README.md`
 - 查看项目结构: `PROJECT_STRUCTURE.md`
-- 查看英文文档: `README_IMPLEMENTATIONS.md`
+
 
 ## 常见问题
 

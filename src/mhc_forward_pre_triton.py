@@ -16,7 +16,6 @@ Output:
 import torch
 import triton
 import triton.language as tl
-from typing import Optional
 
 
 @triton.jit
@@ -508,50 +507,3 @@ def mhc_forward_pre_triton_optimized(
     else:
         return h_in, h_post, h_res, inv_rms, h_mix, h_pre
 
-
-# ============================================================================
-# Test function
-# ============================================================================
-
-def test_mhc_forward_pre_triton():
-    """Test Triton implementation against reference."""
-    import sys
-    sys.path.append('/Users/huan1178/Downloads/code-base/mhc-ops')
-    from test_mhc_pre_grad import mhc_forward_pre
-
-    # Test parameters
-    B, S, n, D = 2, 128, 4, 256
-
-    # Create test data
-    torch.manual_seed(42)
-    x = torch.randn(B, S, n, D, dtype=torch.bfloat16, device='cuda')
-    phi = torch.randn(n*n + 2*n, n*D, dtype=torch.float32, device='cuda')
-    alpha = torch.tensor([1.1, 0.9, 1.05], dtype=torch.float32, device='cuda')
-    bias = torch.randn(n*n + 2*n, dtype=torch.float32, device='cuda') * 0.1
-
-    # Reference
-    h_in_ref, h_post_ref, h_res_ref = mhc_forward_pre(
-        x.cpu(), phi.cpu(), alpha.cpu(), bias.cpu()
-    )
-    h_in_ref = h_in_ref.cuda()
-    h_post_ref = h_post_ref.cuda()
-    h_res_ref = h_res_ref.cuda()
-
-    # Triton
-    h_in_tri, h_post_tri, h_res_tri = mhc_forward_pre_triton_optimized(
-        x, phi, alpha, bias
-    )
-
-    # Compare
-    print(f"h_in max error: {(h_in_tri.float() - h_in_ref.float()).abs().max().item()}")
-    print(f"h_post max error: {(h_post_tri - h_post_ref).abs().max().item()}")
-    print(f"h_res max error: {(h_res_tri - h_res_ref).abs().max().item()}")
-
-    assert torch.allclose(h_in_tri.float(), h_in_ref.float(), rtol=1e-3, atol=1e-3)
-    assert torch.allclose(h_post_tri, h_post_ref, rtol=1e-3, atol=1e-3)
-    assert torch.allclose(h_res_tri, h_res_ref, rtol=1e-3, atol=1e-3)
-    print("All tests passed!")
-
-
-if __name__ == "__main__":
-    test_mhc_forward_pre_triton()
