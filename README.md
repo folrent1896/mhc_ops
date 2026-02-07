@@ -23,7 +23,7 @@
 
 | 实现 | 描述 | 优势 |
 |------|------|------|
-| **PyTorch 参考** | `test/test_mhc_pre_grad.py` | 基准实现，用于验证正确性 |
+| **Golden 参考** | `src/golden.py` | 基准实现，用于验证正确性 |
 | **Triton** | `src/mhc_forward_pre_triton.py` | GPU kernel，高性能 |
 | **TileLang** | `src/mhc_forward_pre_tilelang.py` | DSL 实现，可移植性强 |
 
@@ -71,12 +71,12 @@
 mhc-ops/
 ├── src/                               # 源代码实现
 │   ├── __init__.py
+│   ├── golden.py                      # Golden 参考实现
 │   ├── mhc_forward_pre_triton.py      # Triton GPU kernels
 │   └── mhc_forward_pre_tilelang.py    # TileLang DSL 实现
 │
 ├── test/                              # 测试代码
 │   ├── __init__.py
-│   ├── test_mhc_pre_grad.py           # PyTorch 参考实现
 │   ├── test_implementations.py        # 完整测试套件
 │   ├── quick_test.py                  # 快速验证脚本
 │   └── benchmark.py                   # 性能基准测试
@@ -133,10 +133,10 @@ python -c "import src; print(src.__version__)"
 
 ## 快速开始
 
-### 1. PyTorch 参考实现
+### 1. Golden 参考实现
 
 ```python
-from test.test_mhc_pre_grad import mhc_forward_pre
+from src.golden import mhc_forward_pre
 import torch
 
 # 准备输入

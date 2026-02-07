@@ -7,6 +7,10 @@ mhc-ops/
 │
 ├── src/                               # 源代码目录
 │   ├── __init__.py                    # 包初始化文件
+│   ├── golden.py                      # Golden 参考实现
+│   │   ├── mhc_forward_pre()          #   正向传播
+│   │   └── mhc_pre_backward_manual()  #   手动反向传播
+│   │
 │   ├── mhc_forward_pre_triton.py      # Triton GPU kernel 实现
 │   │   ├── mhc_forward_pre_kernel()   #   单 kernel 版本
 │   │   ├── mhc_forward_pre_triton()   #   单 kernel 包装函数
@@ -21,10 +25,6 @@ mhc-ops/
 │
 ├── test/                              # 测试代码目录
 │   ├── __init__.py                    # 包初始化文件
-│   ├── test_mhc_pre_grad.py           # PyTorch 参考实现
-│   │   ├── mhc_forward_pre()          #   正向传播
-│   │   └── mhc_pre_backward_manual()  #   手动反向传播
-│   │
 │   ├── test_implementations.py        # 完整测试套件
 │   │   ├── TestResult                 #   测试结果数据类
 │   │   ├── MHCOperatorTester          #   测试器类
@@ -54,6 +54,18 @@ mhc-ops/
 ## 模块说明
 
 ### 源代码模块 (`src/`)
+
+#### `golden.py`
+Golden 参考实现，用于验证其他实现的正确性。
+
+**函数:**
+- `mhc_forward_pre()` - 正向传播
+- `mhc_pre_backward_manual()` - 手动反向传播（梯度验证）
+
+**特点:**
+- 纯 PyTorch 实现
+- 易于理解和调试
+- 作为其他实现的精度基准
 
 #### `mhc_forward_pre_triton.py`
 提供两个 Triton 实现版本：
