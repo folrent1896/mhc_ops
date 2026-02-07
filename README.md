@@ -70,19 +70,35 @@
 ```
 mhc-ops/
 ├── src/                               # 源代码实现
-│   ├── __init__.py
-│   ├── golden.py                      # Golden 参考实现
-│   ├── mhc_forward_pre_triton.py      # Triton GPU kernels
-│   └── mhc_forward_pre_tilelang.py    # TileLang DSL 实现
+│   ├── forward/                        # 前向传播实现
+│   │   ├── __init__.py
+│   │   ├── golden.py                   # Golden 参考实现
+│   │   ├── mhc_forward_pre_triton.py   # Triton GPU kernels
+│   │   └── mhc_forward_pre_tilelang.py # TileLang DSL 实现
+│   │
+│   ├── backward/                       # 反向传播实现
+│   │   ├── __init__.py
+│   │   ├── golden.py                   # Golden 参考实现
+│   │   ├── mhc_backward_triton.py      # Triton GPU kernels
+│   │   └── mhc_backward_tilelang.py    # TileLang DSL 实现
+│   │
+│   └── __init__.py                     # 统一导出接口
 │
 ├── test/                              # 测试代码
-│   ├── __init__.py
-│   ├── test_implementations.py        # 完整测试套件
-│   ├── quick_test.py                  # 快速验证脚本
-│   └── benchmark.py                   # 性能基准测试
+│   ├── forward/                        # 前向传播测试
+│   │   ├── test_forward.py             # 完整测试套件
+│   │   ├── benchmark.py                # 性能基准测试
+│   │   └── quick_test.py               # 快速验证
+│   │
+│   ├── backward/                       # 反向传播测试
+│   │   └── test_backward.py            # Backward 测试
+│   │
+│   └── __init__.py
 │
 ├── README.md                          # 中文文档（本文件）
-├── README_IMPLEMENTATIONS.md          # 英文文档
+├── BACKWARD.md                         # Backward 算子文档
+├── PROJECT_STRUCTURE.md                # 项目结构说明
+├── QUICKSTART.md                       # 快速开始指南
 └── setup.py                           # 安装配置
 ```
 
@@ -136,7 +152,7 @@ python -c "import src; print(src.__version__)"
 ### 1. Golden 参考实现
 
 ```python
-from src.golden import mhc_forward_pre
+from src.forward import mhc_forward_pre
 import torch
 
 # 准备输入
@@ -157,7 +173,7 @@ print(f"h_res shape: {h_res.shape}")    # [2, 128, 4, 4]
 ### 2. Triton 实现（推荐用于 GPU）
 
 ```python
-from src.mhc_forward_pre_triton import mhc_forward_pre_triton_optimized
+from src.forward.mhc_forward_pre_triton import mhc_forward_pre_triton_optimized
 import torch
 
 # 准备输入（必须在 GPU 上）
@@ -175,7 +191,7 @@ h_in, h_post, h_res = mhc_forward_pre_triton_optimized(x, phi, alpha, bias)
 ### 3. TileLang 实现
 
 ```python
-from src.mhc_forward_pre_tilelang import MHCForwardPreTileLang
+from src.forward import MHCForwardPreTileLang
 import torch
 
 # 编译算子
@@ -200,7 +216,7 @@ h_in, h_post, h_res = op(x, phi, alpha, bias)
 
 ```python
 import torch
-from src.mhc_forward_pre_triton import mhc_forward_pre_triton_optimized
+from src.forward.mhc_forward_pre_triton import mhc_forward_pre_triton_optimized
 
 # 配置
 B, S, n, D = 1, 512, 4, 256
@@ -223,7 +239,7 @@ print(f"输出形状: h_in={h_in.shape}, h_post={h_post.shape}, h_res={h_res.sha
 
 ```python
 import torch
-from src.mhc_forward_pre_triton import mhc_forward_pre_triton_optimized
+from src.forward.mhc_forward_pre_triton import mhc_forward_pre_triton_optimized
 
 device = 'cuda'
 batch_size = 4
@@ -248,7 +264,7 @@ h_in_batch = torch.cat([o[0] for o in outputs], dim=0)
 ```python
 import torch
 import torch.nn as nn
-from src.mhc_forward_pre_triton import mhc_forward_pre_triton_optimized
+from src.forward.mhc_forward_pre_triton import mhc_forward_pre_triton_optimized
 
 class MHCBlock(nn.Module):
     def __init__(self, n=4, D=256):
@@ -285,7 +301,7 @@ h_in, h_post, h_res = model(x)
 
 ```bash
 # 运行快速验证（推荐）
-python test/quick_test.py
+python test/forward/quick_test.py
 ```
 
 **输出示例：**
@@ -320,26 +336,26 @@ Accuracy:
 
 ```bash
 # 完整测试（多种配置）
-python test/test_implementations.py
+python test/forward/test_forward.py
 
 # 快速模式（较少配置）
-python test/test_implementations.py --quick
+python test/forward/test_forward.py --quick
 
 # 指定设备
-python test/test_implementations.py --device cuda
+python test/forward/test_forward.py --device cuda
 
 # 自定义容差
-python test/test_implementations.py --rtol 1e-4 --atol 1e-4
+python test/forward/test_forward.py --rtol 1e-4 --atol 1e-4
 
 # 查看帮助
-python test/test_implementations.py --help
+python test/forward/test_forward.py --help
 ```
 
 ### 性能基准测试
 
 ```bash
 # 独立性能测试
-python test/benchmark.py
+python test/forward/benchmark.py
 ```
 
 **输出示例：**
@@ -466,10 +482,10 @@ x = torch.randn(B, S, n, D, device=device)
 **解决：**
 ```bash
 # 使用更严格的容差运行测试
-python test/test_implementations.py --rtol 1e-5 --atol 1e-5
+python test/forward/test_forward.py --rtol 1e-5 --atol 1e-5
 
 # 或检查详细输出
-python test/quick_test.py
+python test/forward/quick_test.py
 ```
 
 ### Q4: 如何选择合适的实现？
