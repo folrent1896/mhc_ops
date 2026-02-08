@@ -88,7 +88,7 @@ def mhc_forward_pre_kernel(
     # Step 2: Compute RMSNorm
     # -----------------------------------------------------------
     # Compute mean of squares: mean(x^2) over n*D
-    x_sq = x_block ** 2
+    x_sq = x_block * x_block
     x_sq_sum = tl.sum(x_sq)
     mean_sq = x_sq_sum / (n * D)
     inv_rms = tl.rsqrt(mean_sq + norm_eps)
@@ -396,7 +396,7 @@ def rmsnorm_kernel(
             x_mask = n_mask[:, None] & d_mask[None, :]
 
             x_block = tl.load(x_ptr + x_off, mask=x_mask, other=0.0)
-            acc += tl.sum(x_block ** 2)
+            acc += tl.sum(x_block * x_block)
 
     mean_sq = acc / (nD)
     inv_rms = tl.rsqrt(mean_sq + norm_eps)
@@ -417,7 +417,13 @@ def mhc_forward_pre_triton_optimized(
 ):
     """
     Optimized MHC Forward Pre using separate kernels.
+    Falls back to golden implementation if CUDA is not available.
     """
+    # Check if CUDA is available
+    if not torch.cuda.is_available():
+        from .golden import mhc_forward_pre
+        return mhc_forward_pre(x, phi, alpha, bias, outflag, norm_eps, hc_eps)
+
     B, S, n, D = x.shape
     nD = n * D
     out_features = n * n + 2 * n

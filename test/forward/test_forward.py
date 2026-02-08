@@ -162,8 +162,7 @@ class MHCOperatorTester:
         mean_error = abs_error.mean().item()
 
         # Check if within tolerance
-        close = torch.allclose(output, reference, rtol=self.rtol, atol=self.atol)
-        passed = close.item()
+        passed = torch.allclose(output, reference, rtol=self.rtol, atol=self.atol)
 
         return max_error, mean_error, passed
 
@@ -391,7 +390,7 @@ class MHCOperatorTester:
 
             # Max error across all outputs
             max_error = max(r.h_in_max_error, r.h_post_max_error, r.h_res_max_error)
-            mean_error = max(r.h_in_mean_error, r_post_mean_error, r.h_res_mean_error)
+            mean_error = max(r.h_in_mean_error, r.h_post_mean_error, r.h_res_mean_error)
 
             print(f"{r.name:<20} {status:<10} {max_error:<20.6f} {mean_error:<20.6f} {r.latency_ms:<15.4f} {r.speedup_vs_ref:<10.2f}x")
 

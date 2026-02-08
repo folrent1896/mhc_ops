@@ -204,7 +204,7 @@ def mhc_backward_kernel(
     # Step 8: Compute dvecX_inv (gradient through RMSNorm)
     # ============================================================
     dinv_rms = tl.sum(dh_mix_tmp * h_mix)
-    dvecX_inv = -(dinv_rms * inv_rms ** 3 / nD) * x_block.flatten()
+    dvecX_inv = -(dinv_rms * inv_rms * inv_rms * inv_rms / nD) * x_block.flatten()
 
     # ============================================================
     # Step 9: Compute dvecX_hin (gradient through h_in computation)

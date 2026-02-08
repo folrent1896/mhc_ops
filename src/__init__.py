@@ -14,30 +14,46 @@ from .forward import (
     mhc_forward_pre,
     mhc_forward_pre_triton,
     mhc_forward_pre_triton_optimized,
-    MHCForwardPreTileLang,
-    mhc_forward_pre_tilelang,
-    mhc_forward_pre_tvm,
 )
 
 # Backward implementations
 from .backward import (
     mhc_backward_manual,
     mhc_backward_triton,
-    MHCBackwardTileLang,
-    mhc_backward_tilelang,
 )
+
+# Optional: TileLang support
+try:
+    from .forward import (
+        MHCForwardPreTileLang,
+        mhc_forward_pre_tilelang,
+        mhc_forward_pre_tvm,
+    )
+    from .backward import (
+        MHCBackwardTileLang,
+        mhc_backward_tilelang,
+    )
+    _tilelang_available = True
+except ImportError:
+    _tilelang_available = False
 
 __all__ = [
     # Forward
     "mhc_forward_pre",
     "mhc_forward_pre_triton",
     "mhc_forward_pre_triton_optimized",
-    "MHCForwardPreTileLang",
-    "mhc_forward_pre_tilelang",
-    "mhc_forward_pre_tvm",
     # Backward
     "mhc_backward_manual",
     "mhc_backward_triton",
-    "MHCBackwardTileLang",
-    "mhc_backward_tilelang",
 ]
+
+if _tilelang_available:
+    __all__.extend([
+        # Forward TileLang
+        "MHCForwardPreTileLang",
+        "mhc_forward_pre_tilelang",
+        "mhc_forward_pre_tvm",
+        # Backward TileLang
+        "MHCBackwardTileLang",
+        "mhc_backward_tilelang",
+    ])
