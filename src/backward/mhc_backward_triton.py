@@ -174,10 +174,7 @@ def mhc_backward_kernel(
     # dbias_post: accumulate dh_post2 over B, S
     tl.atomic_add(dbias_ptr + n + dbias_indices, dh_post2, mask=dbias_mask)
 
-    # dbias_res: accumulate dh_res (original input, NOT dh_res1!)
-    # FIX: Use the already-loaded dh_res_block instead of nested loops
-    # IMPORTANT: dbias_res = sum(dh_res), NOT sum(dh_res1 = a_res * dh_res)!
-    # This is because bias is added AFTER alpha scaling in forward.
+    # FIXED: Use dh_res_block directly instead of nested loops
     dbias_res_offset = 2 * n + x_off_n[:, None] * n + x_off_n[None, :]
     tl.atomic_add(dbias_ptr + dbias_res_offset, dh_res_block, mask=dh_res_mask)
 
@@ -238,7 +235,11 @@ def mhc_backward_kernel(
                 phi_res_mask = res_ij_mask[:, :, None] & nD_mask[None, None, :]
                 phi_res = tl.load(phi_ptr + phi_res_off, mask=phi_res_mask, other=0.0)
 
-                temp = tl.sum(dh_res1[:, :, None] * phi_res, axis=1)
+                # Try reversing sum order for better precision
+                # Original: sum(axis=1) then sum(axis=0)
+                # New: sum(axis=0) then sum(axis=0)
+                # FIXED: Multiply by inv_rms like Parts 1 and 2
+                temp = tl.sum((dh_res1 * inv_rms)[:, :, None] * phi_res, axis=0)
                 acc += tl.sum(temp, axis=0)
 
         # FIX: Write to global memory for each block
