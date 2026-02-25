@@ -174,23 +174,12 @@ def mhc_backward_kernel(
     # dbias_post: accumulate dh_post2 over B, S
     tl.atomic_add(dbias_ptr + n + dbias_indices, dh_post2, mask=dbias_mask)
 
-    for i in range(0, n, BLOCK_SIZE_N):
-        for j in range(0, n, BLOCK_SIZE_N):
-            i_idx = tl.arange(0, BLOCK_SIZE_N)
-            j_idx = tl.arange(0, BLOCK_SIZE_N)
-            i_mask = (i + i_idx) < n
-            j_mask = (j + j_idx) < n
-            ij_mask = i_mask[:, None] & j_mask[None, :]
-
-            dh_res1_chunk = tl.load(
-                dh_res_ptr + ((b_idx * stride_hres_b + s_idx * stride_hres_s) +
-                             (i + i_idx)[:, None] * stride_hres_n1 +
-                             (j + j_idx)[None, :] * stride_hres_n2),
-                mask=ij_mask, other=0.0
-            ) * a_res
-
-            dbias_offset = 2 * n + (i + i_idx)[:, None] * n + (j + j_idx)[None, :]
-            tl.atomic_add(dbias_ptr + dbias_offset, dh_res1_chunk, mask=ij_mask)
+    # dbias_res: accumulate dh_res (original input, NOT dh_res1!)
+    # FIX: Use the already-loaded dh_res_block instead of nested loops
+    # IMPORTANT: dbias_res = sum(dh_res), NOT sum(dh_res1 = a_res * dh_res)!
+    # This is because bias is added AFTER alpha scaling in forward.
+    dbias_res_offset = 2 * n + x_off_n[:, None] * n + x_off_n[None, :]
+    tl.atomic_add(dbias_ptr + dbias_res_offset, dh_res_block, mask=dh_res_mask)
 
     # ============================================================
     # Step 6: Compute dvecX_inv (RMSNorm gradient)
