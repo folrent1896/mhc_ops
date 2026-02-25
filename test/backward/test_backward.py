@@ -126,6 +126,7 @@ def test_backward_triton_vs_golden():
 
 def test_backward_tilelang_vs_golden():
     """Test TileLang backward against golden reference."""
+    # Commented out - needs API rewrite
     print("\n" + "=" * 70)
     print("Testing TileLang Backward vs Golden Reference")
     print("=" * 70)

@@ -5,9 +5,10 @@ This module implements the backward pass using TileLang/TVM.
 """
 
 import torch
-import tvm
-from tvm import te
-
+import tilelang
+from tilelang import tvm as tvm
+from tilelang.lang import Tensor
+import tilelang.language as T
 
 def mhc_backward_tilelang(
     B: int,
@@ -55,11 +56,14 @@ def mhc_backward_tilelang(
     # ============================================================
     # Step 1: Compute dh_pre from dh_in
     # dh_pre[b, s, i] = sum_j(dh_in[b, s, j] * x[b, s, i, j])
+    # FIXED: Use te.reduce_axis for reduction
     # ============================================================
+    j = te.reduce_axis((0, D), name="j")
     dh_pre = te.compute(
         [B, S, n],
         lambda b, s, i: te.sum(
-            dh_in[b, s, :].astype(compute_dtype) * x[b, s, i, :].astype(compute_dtype)
+            dh_in[b, s, j].astype(compute_dtype) * x[b, s, i, j].astype(compute_dtype),
+            axis=j
         ),
         name="dh_pre"
     )
@@ -131,10 +135,12 @@ def mhc_backward_tilelang(
 
     # ============================================================
     # Step 5: Compute dvecX_mm = dh_mix @ phi
+    # FIXED: Use te.reduce_axis for reduction
     # ============================================================
+    k = te.reduce_axis((0, out_features), name="k_phi")
     dvecX_mm = te.compute(
         [B, S, nD],
-        lambda b, s, i: te.sum(dh_mix[b, s, :] * phi[:, i]),
+        lambda b, s, i: te.sum(dh_mix[b, s, k] * phi[k, i], axis=k),
         name="dvecX_mm"
     )
 
@@ -153,16 +159,21 @@ def mhc_backward_tilelang(
         name="x_scaled_flat"
     )
 
+    # FIXED: Use te.reduce_axis for reduction over B and S
+    b1 = te.reduce_axis((0, B), name="b1")
+    s1 = te.reduce_axis((0, S), name="s1")
     dphi = te.compute(
         [out_features, nD],
         lambda k, i: te.sum(
-            dh_mix[:, :, k] * x_scaled_flat[:, :, i]
+            dh_mix[b1, s1, k] * x_scaled_flat[b1, s1, i],
+            axis=[b1, s1]
         ),
         name="dphi"
     )
 
     # ============================================================
     # Step 7: Compute dalpha
+    # FIXED: Create intermediate tensors for reductions
     # ============================================================
     h_mix_tmp = te.compute(
         [B, S, out_features],
@@ -174,29 +185,44 @@ def mhc_backward_tilelang(
     h_post1 = te.compute([B, S, n], lambda b, s, i: h_mix_tmp[b, s, n + i], name="h_post1_reuse")
     h_res1 = te.compute([B, S, n, n], lambda b, s, i, j: h_mix_tmp[b, s, 2 * n + i * n + j], name="h_res1_reuse")
 
-    dalpha_pre = te.reduce(
-        lambda b, s: dh_pre2[b, s, 0] * h_pre1[b, s, 0],
-        lambda x, y: x + y,
-        name="dalpha_pre"
-    )
-    dalpha_pre = te.compute([],
-        lambda: tvm.tir.Sum(dh_pre2[:, :, :] * h_pre1[:, :, :]),
-        name="dalpha_pre_final"
-    )
+    # Create reduction tensors first
+    b2 = te.reduce_axis((0, B), name="b2")
+    s2 = te.reduce_axis((0, S), name="s2")
+    i2 = te.reduce_axis((0, n), name="i2")
 
-    # Use te.sum for simpler reduction
-    dalpha_pre_val = te.sum(dh_pre2 * h_pre1)
-    dalpha_post_val = te.sum(dh_post2 * h_post1)
-    dalpha_res_val = te.sum(dh_res * h_res1)
+    b3 = te.reduce_axis((0, B), name="b3")
+    s3 = te.reduce_axis((0, S), name="s3")
+    i3 = te.reduce_axis((0, n), name="i3")
+
+    b4 = te.reduce_axis((0, B), name="b4")
+    s4 = te.reduce_axis((0, S), name="s4")
+    i4 = te.reduce_axis((0, n), name="i4")
+    j4 = te.reduce_axis((0, n), name="j4")
+
+    dalpha_pre_val = te.compute(
+        [],
+        lambda: te.sum(dh_pre2[b2, s2, i2] * h_pre1[b2, s2, i2], axis=[b2, s2, i2]),
+        name="dalpha_pre_val"
+    )
+    dalpha_post_val = te.compute(
+        [],
+        lambda: te.sum(dh_post2[b3, s3, i3] * h_post1[b3, s3, i3], axis=[b3, s3, i3]),
+        name="dalpha_post_val"
+    )
+    dalpha_res_val = te.compute(
+        [],
+        lambda: te.sum(dh_res[b4, s4, i4, j4] * h_res1[b4, s4, i4, j4], axis=[b4, s4, i4, j4]),
+        name="dalpha_res_val"
+    )
 
     dalpha = te.compute([3],
         lambda k: te.if_then_else(
             k == 0,
-            dalpha_pre_val,
+            dalpha_pre_val(),
             te.if_then_else(
                 k == 1,
-                dalpha_post_val,
-                dalpha_res_val
+                dalpha_post_val(),
+                dalpha_res_val()
             )
         ),
         name="dalpha"
@@ -205,21 +231,30 @@ def mhc_backward_tilelang(
     # ============================================================
     # Step 8: Compute dbias
     # ============================================================
+    b5 = te.reduce_axis((0, B), name="b5")
+    s5 = te.reduce_axis((0, S), name="s5")
+
+    b6 = te.reduce_axis((0, B), name="b6")
+    s6 = te.reduce_axis((0, S), name="s6")
+
+    b7 = te.reduce_axis((0, B), name="b7")
+    s7 = te.reduce_axis((0, S), name="s7")
+
     dbias_pre = te.compute(
         [n],
-        lambda i: te.sum(dh_pre2[:, :, i]),
+        lambda i: te.sum(dh_pre2[b5, s5, i], axis=[b5, s5]),
         name="dbias_pre"
     )
 
     dbias_post = te.compute(
         [n],
-        lambda i: te.sum(dh_post2[:, :, i]),
+        lambda i: te.sum(dh_post2[b6, s6, i], axis=[b6, s6]),
         name="dbias_post"
     )
 
     dbias_res = te.compute(
         [n * n],
-        lambda idx: te.sum(dh_res[:, :, idx // n, idx % n]),
+        lambda idx: te.sum(dh_res[b7, s7, idx // n, idx % n], axis=[b7, s7]),
         name="dbias_res"
     )
 
@@ -240,9 +275,13 @@ def mhc_backward_tilelang(
     # ============================================================
     # Step 9: Compute dinv_rms and dvecX_inv
     # ============================================================
+    k2 = te.reduce_axis((0, out_features), name="k2")
     dinv_rms = te.compute(
         [B, S, 1],
-        lambda b, s, _: te.sum(dh_mix_tmp[b, s, :] * h_mix[b, s, :]),
+        lambda b, s, _: te.sum(
+            dh_mix_tmp[b, s, k2] * h_mix[b, s, k2],
+            axis=k2
+        ),
         name="dinv_rms"
     )
 
@@ -254,7 +293,7 @@ def mhc_backward_tilelang(
 
     dvecX_inv = te.compute(
         [B, S, nD],
-        lambda b, s, i: -(dinv_rms[b, s, 0] * inv_rms[b, s] ** 3 / nD) * vecX[b, s, i],
+        lambda b, s, i: -(dinv_rms[b, s, 0] * inv_rms[b, s] * inv_rms[b, s] * inv_rms[b, s] / nD) * vecX[b, s, i],
         name="dvecX_inv"
     )
 
@@ -282,32 +321,48 @@ def mhc_backward_tilelang(
 
     # ============================================================
     # Step 12: Compute dgamma
+    # FIXED: Use te.reduce_axis for reduction
     # ============================================================
+    b8 = te.reduce_axis((0, B), name="b8")
+    s8 = te.reduce_axis((0, S), name="s8")
     dgamma = te.compute(
         [n, D],
         lambda i, j: te.sum(
-            vecX[:, :, i * D + j] * dvecX_mm[:, :, i * D + j]
+            vecX[b8, s8, i * D + j] * dvecX_mm[b8, s8, i * D + j],
+            axis=[b8, s8]
         ),
         name="dgamma"
     )
 
     # Create schedule
-    s = te.create_schedule([dx.op, dphi.op, dalpha.op, dbias.op, dgamma.op])
+    s = te.create_schedule({dx.op, dphi.op, dalpha.op, dbias.op, dgamma.op})
 
     # Apply optimizations
+    # Inline small computations
+    for op in [s_pre2.op, x_scaled.op, x_scaled_flat.op,
+               dh_mix_tmp.op, vecX.op]:
+        s[op].compute_inline()
+
     # GPU scheduling
     if tvm.cuda().exist:
-        # Parallelize over batch and sequence
-        for op in [dh_pre.op, dh_pre2.op, dh_post2.op, dvecX_mm.op]:
-            s[op].parallel(b)
-            s[op].parallel(s)
+        # Parallelize over batch and sequence for compute-bound ops
+        for op in [dh_pre.op, dvecX_mm.op]:
+            fused = s[op].fuse(op.axis[0], op.axis[1])
+            s[op].parallel(fused)
 
-        # GPU grid scheduling
-        for op in [dx.op, dphi.op]:
-            s[op].grid(
-                te.thread_axis("blockIdx.x"),
-                te.thread_axis("threadIdx.x")
-            )
+        # GPU grid/block scheduling for output ops
+        for op in [dx.op, dphi.op, dgamma.op]:
+            # Fuse multiple dimensions
+            if len(op.axis) >= 3:
+                fused = s[op].fuse(op.axis[0], op.axis[1])
+                fused = s[op].fuse(fused, op.axis[2])
+            else:
+                fused = s[op].fuse(op.axis[0], op.axis[1])
+
+            # Split into blocks and threads
+            bx, tx = s[op].split(fused, 256)
+            s[op].bind(bx, te.thread_axis("blockIdx.x"))
+            s[op].bind(tx, te.thread_axis("threadIdx.x"))
 
     # Build
     ctx = tvm.gpu(0) if tvm.cuda().exist else tvm.cpu(0)

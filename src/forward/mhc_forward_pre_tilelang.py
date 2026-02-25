@@ -16,7 +16,7 @@ Output:
 import torch
 import tilelang
 from tilelang import tvm as tvm
-from tilelang.lang import Tensor
+from tilelang.language import Tensor
 import tilelang.language as T
 
 

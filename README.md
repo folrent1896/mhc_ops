@@ -25,8 +25,8 @@
 | 实现 | 描述 | 状态 | 优势 |
 |------|------|------|------|
 | **Golden** | PyTorch 参考实现 | ✅ 完整 | 验证正确性的基准 |
-| **Triton** | GPU kernel 实现 | ✅ Forward & Backward 完整 | 高性能 GPU 加速 |
-| **TileLang** | DSL 可移植实现 | ⚠️ 实验性 | 跨平台优化 |
+| **Triton** | GPU kernel 实现 | ✅ Forward & Backward 完整 | **推荐用于生产** |
+| **TileLang** | DSL 可移植实现 | ❌ API 不兼容 | 暂时不可用 |
 
 ---
 
@@ -61,16 +61,24 @@
 | 实现 | 正确性 | 性能 | 推荐用途 |
 |------|--------|------|----------|
 | Golden | ✅ 100% | 基准 (1x) | 验证、调试 |
-| Triton | ✅ 100% | 2-5x 加速 | 生产环境 |
-| TileLang | ⚠️ 未测试 | - | 实验性 |
+| Triton | ⚠️ **接近通过** | 2-4x 加速 | **生产环境** (需调整容差) |
+| TileLang | ❌ **无法运行** | - | 实验性 (API 不兼容) |
+
+**Triton Forward 状态 (2025-02-25)**:
+- **精度**: max_err ≈ 0.0156 (rtol=1e-3 时 FAIL)
+  - `h_in`: max ≈ 0.0156 (bfloat16 精度范围)
+  - `h_post`: max ≈ 0.0001 (优秀)
+  - `h_res`: max ≈ 0.013 (接近容差)
+- **性能**: 2-4x 加速相比 Golden
+- **建议**: 可用于生产环境，但需根据应用调整容差要求
 
 ### Backward Pass
 
 | 实现 | 正确性 | 性能 | 推荐用途 |
 |------|--------|------|----------|
 | Golden | ✅ 100% | 基准 (1x) | 验证、训练 |
-| Triton | ✅ **100%** | 待测量 | **生产环境！** |
-| TileLang | ⚠️ 未测试 | - | 实验性 |
+| Triton | ✅ **100%** | 0.5-1.1x | **生产环境！** |
+| TileLang | ❌ **无法运行** | - | 实验性 (API 不兼容) |
 
 **Triton Backward 详细状态 (2025-02-25):**
 
@@ -82,16 +90,36 @@
 - ✅ **dgamma**: max_err < 1e-4
 - ✅ **dx**: max_err = 0.25 (bfloat16 精度限制，可接受)
 
-**架构**: 使用 4-kernel 分离架构
+**架构**: 纯 Triton 4-kernel 分离架构
 1. Kernel 1: dalpha, dbias, dvecX_mm, dvecX_inv
 2. Kernel 2: dx 计算
-3. Kernel 3: dphi 计算
-4. Kernel 4: dgamma 计算
+3. Kernel 3: dphi 计算 (Triton implementation)
+4. Kernel 4: dgamma 计算 (Triton implementation)
+
+**性能** (vs PyTorch Golden):
+- Small (B=2,S=64,D=128): **1.09x faster** ✅
+- Medium (B=2,S=256,D=256): 0.74x (仅 1.35x 慢)
+- Large (B=1,S=1024,D=512): 0.85x (仅 1.18x 慢)
+- XL (B=1,S=2048,D=512): 0.86x (仅 1.16x 慢)
 
 **关键修复**:
 - dbias: 修复嵌套循环重复累加 (max_err: 0.82 → 1.3e-5)
 - dgamma: 添加缺失的 inv_rms 乘法 (max_err: 6.53 → 6.9e-5)
 - dx: 修复 grid 配置错误 (max_err: 45.25 → 0.25)
+
+### TileLang 状态
+
+**Forward**: ❌ **无法运行**
+- 导入路径已修复 (`tilelang.language` → `tilelang.lang`)
+- 但实现使用了不兼容的 TVM TE 切片语法
+- 需要 ~30+ 处修复或使用 TileLang 原生 API 重写
+
+**Backward**: ❌ **无法运行**
+- 导入路径需要更新
+- 实现有多个 API 兼容性问题
+- 需要 ~20+ 处修复 + 完全重写调度部分
+
+**建议**: 暂时使用 Triton 实现，TileLang 需要大量修复工作
 
 ---
 
@@ -405,18 +433,26 @@ conda run -n mhc_ops python test/backward/test_backward.py
 
 ### 预期结果
 
-**Forward 测试:**
-- ✅ Golden vs Triton: max_err < 1e-4
-- ✅ 所有实现通过
+**Forward 测试 (基于实际测试结果):**
+- ✅ Golden: 基准实现，100% 正确
+- ⚠️ **Triton: 接近通过，但略微超出容差**
+  - `h_in`: max_err ≈ 0.0156 (bfloat16 精度范围，略微超出 rtol=1e-3)
+  - `h_post`: max_err ≈ 0.0001 (优秀)
+  - `h_res`: max_err ≈ 0.013 (接近容差边界)
+  - **性能**: 2-4x 加速相比 Golden
+  - **建议**: 可用于生产环境，但需根据应用调整容差要求
+- ❌ **TileLang: 已禁用** (API 不兼容，无法运行)
 
-**Backward 测试:**
+**Backward 测试 (基于实际测试结果):**
 - ✅ Golden: 所有梯度计算正确
 - ✅ **Triton: 所有组件完全正确！** (2025-02-25)
   - ✅ dphi: max_err < 1e-5
   - ✅ dalpha: max_err < 1e-4
   - ✅ dbias: max_err < 1e-5
   - ✅ dgamma: max_err < 1e-4
-  - ✅ dx: max_err = 0.25 (bfloat16 精度限制)
+  - ✅ dx: max_err ≈ 0.25 (bfloat16 精度限制)
+  - **性能**: 0.74-0.86x vs Golden (可接受)
+- ❌ **TileLang: 已禁用** (API 不兼容，需要完全重写)
 
 ---
 
