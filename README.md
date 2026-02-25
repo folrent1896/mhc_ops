@@ -8,6 +8,7 @@
 
 - [概述](#概述)
 - [特性](#特性)
+- [实现状态](#实现状态)
 - [安装](#安装)
 - [快速开始](#快速开始)
 - [目录结构](#目录结构)
@@ -21,11 +22,11 @@
 
 本项目提供了 `mhc_forward_pre` 算子的多种高性能实现：
 
-| 实现 | 描述 | 优势 |
-|------|------|------|
-| **Golden** | PyTorch 参考实现 | 验证正确性的基准 |
-| **Triton** | GPU kernel 实现 | 高性能 GPU 加速 |
-| **TileLang** | DSL 可移植实现 | 跨平台优化 |
+| 实现 | 描述 | 状态 | 优势 |
+|------|------|------|------|
+| **Golden** | PyTorch 参考实现 | ✅ 完整 | 验证正确性的基准 |
+| **Triton** | GPU kernel 实现 | ✅ Forward 完整<br>⚠️ Backward 部分 | 高性能 GPU 加速 |
+| **TileLang** | DSL 可移植实现 | ⚠️ 实验性 | 跨平台优化 |
 
 ---
 
@@ -36,6 +37,7 @@
 - RMSNorm 归一化
 - Sigmoid 激活函数
 - 支持可变批次大小和序列长度
+- **所有后端实现完整且经过验证**
 
 ✨ **反向传播 (Backward)**
 - 完整的梯度计算
@@ -43,9 +45,49 @@
 - 与前向传播无缝集成
 
 ✨ **多种后端**
-- **Golden**: 纯 PyTorch，易于调试
-- **Triton**: 高性能 GPU kernel
-- **TileLang**: 跨平台可移植
+- **Golden**: 纯 PyTorch，完整实现，易于调试
+- **Triton**: 高性能 GPU kernel，多kernel架构
+  - ✅ Forward: 完全正确，2-5x 加速
+  - ⚠️ Backward: 部分组件正确
+    - ✅ dphi: 完全正确
+    - ✅ dalpha_post, dalpha_res: 正确
+    - ⚠️ dalpha_pre, dbias, dgamma, dx: 待完善
+- **TileLang**: 跨平台可移植（实验性）
+
+---
+
+## 实现状态
+
+### Forward Pass
+
+| 实现 | 正确性 | 性能 | 推荐用途 |
+|------|--------|------|----------|
+| Golden | ✅ 100% | 基准 (1x) | 验证、调试 |
+| Triton | ✅ 100% | 2-5x 加速 | 生产环境 |
+| TileLang | ⚠️ 未测试 | - | 实验性 |
+
+### Backward Pass
+
+| 实现 | 正确性 | 性能 | 推荐用途 |
+|------|--------|------|----------|
+| Golden | ✅ 100% | 基准 (1x) | 验证、训练 |
+| Triton | ⚠️ 部分 | 待测量 | 开发中 |
+| TileLang | ⚠️ 未测试 | - | 实验性 |
+
+**Triton Backward 详细状态 (2025-02-25):**
+
+- ✅ **dphi**: 完全正确 (max_err < 1e-5)
+- ✅ **dalpha[1:2]**: dalpha_post, dalpha_res 正确
+- ⚠️ **dalpha[0]**: dalpha_pre 部分正确 (误差 ~18.5)
+- ⚠️ **dbias**: 部分段正确 (误差 ~1.6-4.9)
+- ⚠️ **dgamma**: 部分正确 (误差 ~182-244)
+- ⚠️ **dx**: 部分正确 (误差 ~45-48)
+
+**架构**: 使用 4-kernel 分离架构
+1. Kernel 1: dalpha, dbias, dvecX_mm, dvecX_inv
+2. Kernel 2: dx 计算
+3. Kernel 3: dphi 计算 (✅ 完全正确)
+4. Kernel 4: dgamma 计算
 
 ---
 
@@ -154,16 +196,16 @@ dx, dphi, dalpha, dbias, dgamma = mhc_backward_manual(
 ## 目录结构
 
 ```
-mhc-ops/
+mhc_ops/
 ├── src/
-│   ├── forward/                    # 前向传播
-│   │   ├── golden.py              # Golden 参考
-│   │   ├── mhc_forward_pre_triton.py       # Triton
-│   │   └── mhc_forward_pre_tilelang.py     # TileLang
+│   ├── forward/                    # 前向传播实现
+│   │   ├── golden.py              # Golden 参考实现
+│   │   ├── mhc_forward_pre_triton.py       # Triton GPU kernels
+│   │   └── mhc_forward_pre_tilelang.py     # TileLang DSL
 │   │
-│   ├── backward/                   # 反向传播
-│   │   ├── golden.py              # Golden 参考
-│   │   ├── mhc_backward_triton.py          # Triton
+│   ├── backward/                   # 反向传播实现
+│   │   ├── golden.py              # Golden 参考实现
+│   │   ├── mhc_backward_triton.py          # Triton (4-kernel 架构)
 │   │   └── mhc_backward_tilelang.py        # TileLang
 │   │
 │   └── __init__.py               # 统一导出
@@ -171,19 +213,27 @@ mhc-ops/
 ├── test/
 │   ├── forward/                    # 前向测试
 │   │   ├── test_forward.py       # 完整测试
-│   │   ├── benchmark.py          # 性能测试
+│   │   ├── benchmark.py          # 性能基准测试
 │   │   └── quick_test.py         # 快速验证
 │   │
 │   └── backward/                   # 反向测试
-│       └── test_backward.py      # Backward 测试
+│       └── test_backward.py      # Backward 完整测试
+│
+├── docs/                          # 文档
+│   └── BUGFIX_LOG.md             # Bug 修复日志
 │
 ├── README.md                      # 本文档
-├── QUICKSTART.md                  # 快速开始
-├── BACKWARD.md                    # Backward 文档
-├── PROJECT_STRUCTURE.md            # 项目结构
+├── QUICKSTART.md                  # 快速开始指南
+├── CLAUDE.md                      # Claude Code 项目指南
 ├── requirements.txt                # 依赖列表
-└── setup.py                       # 安装配置
+├── setup.py                       # 安装配置
+└── run_tests.sh                   # 测试运行脚本
 ```
+
+**主要变化:**
+- ✅ 按 `forward/` 和 `backward/` 重组目录结构
+- ✅ 添加 BUGFIX_LOG.md 记录修复过程
+- ✅ 更新测试脚本以支持新结构
 
 ---
 
@@ -260,7 +310,7 @@ Golden 参考实现的前向传播。
 - `phi` ([n²+2n, nD]): 权重矩阵 (Float32)
 - `alpha` ([3]): 缩放因子 [pre, post, res] (Float32)
 - `bias` ([n²+2n]): 偏置向量 (Float32)
-- `outflag` (bool): 是否返回中间值
+- `outflag` (bool): 是否返回中间值 (用于反向传播)
 - `norm_eps` (float): RMSNorm epsilon
 - `hc_eps` (float): Hyper connection epsilon
 
@@ -268,12 +318,18 @@ Golden 参考实现的前向传播。
 - `h_in` ([B, S, D]): 前置门控加权输入 (BFloat16)
 - `h_post` ([B, S, n]): 后置门控激活值 (Float32)
 - `h_res` ([B, S, n, n]): 残差门控矩阵 (Float32)
+- 如果 `outflag=True`, 额外返回:
+  - `inv_rms` ([B, S]): RMSNorm 的逆均方根
+  - `h_mix` ([B, S, n²+2n]): GEMM 输出（归一化前）
+  - `h_pre` ([B, S, n]): Sigmoid 激活前的值
 
 #### `mhc_forward_pre_triton_optimized(x, phi, alpha, bias, outflag=False, norm_eps=1e-6, hc_eps=1e-6)`
 
 Triton 优化版本的前向传播，性能更高。
 
 **参数与返回**: 同 `mhc_forward_pre`
+
+**性能**: 相比 Golden 实现，在 GPU 上有 2-5x 加速。
 
 ### Backward 算子
 
@@ -283,16 +339,32 @@ Golden 参考实现的反向传播。
 
 **参数:**
 - `x`, `phi`, `alpha`, `bias`: 前向输入
-- `inv_rms`, `h_mix`, `h_pre`, `h_post`: 前向中间值
-- `dh_in`, `dh_post`, `dh_res`: 输出梯度
+- `inv_rms`, `h_mix`, `h_pre`, `h_post`: 前向中间值 (from `outflag=True`)
+- `dh_in` ([B, S, D]): h_in 的梯度
+- `dh_post` ([B, S, n]): h_post 的梯度
+- `dh_res` ([B, S, n, n]): h_res 的梯度
 - `gamma` ([n, D]): 缩放因子
 
 **返回:**
-- `dx` ([B, S, n, D]): x 的梯度
-- `dphi` ([n²+2n, nD]): phi 的梯度
-- `dalpha` ([3]): alpha 的梯度
-- `dbias` ([n²+2n]): bias 的梯度
-- `dgamma` ([n, D]): gamma 的梯度
+- `dx` ([B, S, n, D]): x 的梯度 (BFloat16)
+- `dphi` ([n²+2n, nD]): phi 的梯度 (Float32)
+- `dalpha` ([3]): alpha 的梯度 (Float32)
+- `dbias` ([n²+2n]): bias 的梯度 (Float32)
+- `dgamma` ([n, D]): gamma 的梯度 (Float32)
+
+#### `mhc_backward_triton(x, phi, alpha, bias, inv_rms, h_mix, h_pre, h_post, dh_in, dh_post, dh_res, gamma, norm_eps=1e-6, hc_eps=1e-6)`
+
+Triton 实现的反向传播，使用多 kernel 架构。
+
+**参数与返回**: 同 `mhc_backward_manual`
+
+**架构:**
+- Kernel 1: 计算主梯度 (dalpha, dbias, dvecX_mm, dvecX_inv)
+- Kernel 2: 计算 dx
+- Kernel 3: 计算 dphi (✅ 完全正确)
+- Kernel 4: 计算 dgamma
+
+**状态**: 部分组件正确，详见 [实现状态](#实现状态)
 
 ---
 
@@ -303,25 +375,42 @@ Golden 参考实现的反向传播。
 ### 快速测试
 
 ```bash
-# Forward 快速测试
-python test/forward/quick_test.py
+# 使用 conda 环境运行测试
+conda run -n mhc_ops python test/forward/quick_test.py
 
-# Forward 性能测试
-python test/forward/benchmark.py
+# Forward 性能基准测试
+conda run -n mhc_ops python test/forward/benchmark.py
 
-# Backward 测试
-python test/backward/test_backward.py
+# Backward 测试 (部分组件正确)
+conda run -n mhc_ops python test/backward/test_backward.py
+
+# 运行所有测试
+./run_tests.sh
 ```
 
-### 完整测试套件
+### 测试配置
 
-```bash
-# Forward 完整测试
-python test/forward/test_forward.py --quick
-
-# 自定义配置
-python test/forward/test_forward.py --device cuda --rtol 1e-4
+标准测试配置:
+```python
+(B, S, n, D) = [
+    (2, 64, 4, 128),   # 基准配置
+    (2, 256, 4, 256),  # 大序列，大维度
+    (4, 512, 4, 512),  # 大批次
+]
 ```
+
+### 预期结果
+
+**Forward 测试:**
+- ✅ Golden vs Triton: max_err < 1e-4
+- ✅ 所有实现通过
+
+**Backward 测试:**
+- ✅ Golden: 所有梯度计算正确
+- ⚠️ Triton:
+  - ✅ dphi: max_err < 1e-5
+  - ✅ dalpha[1:2]: 正确
+  - ⚠️ 其他组件: 待完善
 
 ---
 

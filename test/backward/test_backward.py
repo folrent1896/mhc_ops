@@ -8,14 +8,29 @@ import torch
 import sys
 sys.path.insert(0, '..')
 
-from src.backward.golden import mhc_forward_pre, mhc_pre_backward_manual
+from src.forward.golden import mhc_forward_pre
+from src.backward.golden import mhc_backward_manual
 
 
 def test_backward_triton_vs_golden():
-    """Test Triton backward against golden reference."""
+    """Test Triton backward against golden reference.
+
+    Current status (2025-02-25):
+    - dphi: ✓ PASS (fully correct)
+    - dalpha[1:]: ✓ PASS (dalpha_post, dalpha_res correct)
+    - dalpha[0]: ✗ PARTIAL (dalpha_pre has errors)
+    - dbias: ✗ PARTIAL (some sections correct, others have errors)
+    - dgamma: ✗ PARTIAL (has errors)
+    - dx: ✗ PARTIAL (has errors)
+
+    The multi-kernel architecture is working. Remaining issues appear to be
+    related to indexing or accumulation in specific sections.
+    """
     print("=" * 70)
     print("Testing Triton Backward vs Golden Reference")
     print("=" * 70)
+    print("\n[INFO] Multi-kernel Triton implementation")
+    print("       Status: dphi PASSING, other components PARTIAL")
 
     try:
         from src.backward.mhc_backward_triton import mhc_backward_triton
@@ -51,7 +66,7 @@ def test_backward_triton_vs_golden():
 
     # Golden reference backward
     print("\n[1/3] Computing golden reference backward...")
-    dx_gold, dphi_gold, dalpha_gold, dbias_gold, dgamma_gold = mhc_pre_backward_manual(
+    dx_gold, dphi_gold, dalpha_gold, dbias_gold, dgamma_gold = mhc_backward_manual(
         x, phi, alpha, bias,
         inv_rms, h_mix, h_pre, h_post,
         dh_in, dh_post, dh_res, gamma
@@ -142,7 +157,7 @@ def test_backward_tilelang_vs_golden():
 
     # Golden reference backward
     print("\n[1/2] Computing golden reference backward...")
-    dx_gold, dphi_gold, dalpha_gold, dbias_gold, dgamma_gold = mhc_pre_backward_manual(
+    dx_gold, dphi_gold, dalpha_gold, dbias_gold, dgamma_gold = mhc_backward_manual(
         x, phi, alpha, bias,
         inv_rms, h_mix, h_pre, h_post,
         dh_in, dh_post, dh_res, gamma
@@ -152,7 +167,7 @@ def test_backward_tilelang_vs_golden():
     print("[2/2] Computing TileLang backward...")
 
     try:
-        from src.mhc_backward_tilelang import MHCBackwardTileLang
+        from src.backward.mhc_backward_tilelang import MHCBackwardTileLang
 
         # Compile and run
         op = MHCBackwardTileLang(B, S, n, D)

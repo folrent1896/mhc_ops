@@ -160,7 +160,7 @@ def run_benchmark_suite():
         # Try to import and benchmark Triton
         tri_result = None
         try:
-            from mhc_forward_pre_triton import mhc_forward_pre_triton_optimized
+            from src.forward.mhc_forward_pre_triton import mhc_forward_pre_triton_optimized
 
             print(f"\n[2/2] Benchmarking Triton...")
 

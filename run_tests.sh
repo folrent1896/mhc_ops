@@ -26,17 +26,23 @@ else
 fi
 echo ""
 
-# 运行快速测试
+# 运行前向快速测试
 echo "=================================="
-echo "运行快速测试..."
+echo "运行前向传播快速测试..."
 echo "=================================="
-python test/quick_test.py
+python test/forward/quick_test.py
 
 echo ""
 echo "=================================="
-echo "运行性能基准测试..."
+echo "运行前向传播性能基准测试..."
 echo "=================================="
-python test/benchmark.py
+python test/forward/benchmark.py
+
+echo ""
+echo "=================================="
+echo "运行反向传播测试..."
+echo "=================================="
+python test/backward/test_backward.py
 
 echo ""
 echo "=================================="
