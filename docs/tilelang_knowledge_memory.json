@@ -1,0 +1,283 @@
+{
+  "tilelang_knowledge_base": {
+    "metadata": {
+      "version": "1.0",
+      "created_date": "2025-02-25",
+      "purpose": "MHC Ops TileLang rewrite reference",
+      "sources": [
+        "https://github.com/tile-ai/tilelang",
+        "examples/quickstart.py",
+        "examples/gemm/example_gemm.py",
+        "examples/norm/rms_norm.py",
+        "examples/flash_attention/",
+        "examples/elementwise/example_elementwise_add.py"
+      ]
+    },
+    "core_concepts": {
+      "programming_model": "Tile-Based Programming",
+      "key_insight": "Decompose computation into fixed-size tiles with explicit memory hierarchy management",
+      "memory_hierarchy": {
+        "HBM": "Global memory (slow, large)",
+        "Shared Memory": "~64KB per SM, thread collaboration",
+        "Fragment/Registers": "Thread-private, Tensor Core connection",
+        "Local Memory": "Thread-private, may spill to global"
+      },
+      "three_core_operations": [
+        "Copy (memory movement)",
+        "Compute (GEMM/element-wise)",
+        "Reduce (aggregation)"
+      ]
+    },
+    "api_reference": {
+      "memory_allocation": {
+        "T.alloc_shared": {
+          "purpose": "Allocate shared memory for thread collaboration",
+          "signature": "T.alloc_shared(shape, dtype)",
+          "example": "A_shared = T.alloc_shared((128, 32), T.float16)",
+          "usage": "Temporarily cache data from HBM"
+        },
+        "T.alloc_fragment": {
+          "purpose": "Allocate fragment/register memory for Tensor Core operations",
+          "signature": "T.alloc_fragment(shape, dtype)",
+          "example": "C_local = T.alloc_fragment((128, 128), T.float32)",
+          "usage": "Accumulators for GEMM"
+        },
+        "T.alloc_local": {
+          "purpose": "Allocate thread-private local memory",
+          "signature": "T.alloc_local(shape, dtype)",
+          "example": "temp = T.alloc_local((1,), T.float32)",
+          "usage": "Temporary variables"
+        }
+      },
+      "memory_operations": {
+        "T.copy": {
+          "purpose": "Copy data between memory hierarchies",
+          "signature": "T.copy(src, dst)",
+          "examples": [
+            "T.copy(A[by * block_M, k * block_K], A_shared)  # HBM -> Shared",
+            "T.copy(C_local, C[by * block_M, bx * block_N])  # Fragment -> HBM"
+          ],
+          "optimization": "Automatic coalescing optimization"
+        },
+        "T.fill": {
+          "purpose": "Fill buffer with specific value",
+          "signature": "T.fill(buffer, value)",
+          "example": "T.fill(C_local, 0.0)"
+        },
+        "T.clear": {
+          "purpose": "Clear buffer (zero-fill)",
+          "signature": "T.clear(buffer)",
+          "example": "T.clear(C_local)"
+        }
+      },
+      "compute_operations": {
+        "T.gemm": {
+          "purpose": "Matrix multiplication using Tensor Cores",
+          "signature": "T.gemm(A, B, C, transpose_B=False, policy=T.GemmWarpPolicy.FullRow)",
+          "examples": [
+            "T.gemm(A_shared, B_shared, C_local)",
+            "T.gemm(Q_shared, K_shared, acc_s, transpose_B=True)"
+          ],
+          "note": "Dispatches to Tensor Cores on NVIDIA GPUs"
+        },
+        "elementwise": {
+          "purpose": "Element-wise operations in Parallel loops",
+          "pattern": "Use Python operators in T.Parallel loops",
+          "examples": [
+            "C_local[i, j] = A_shared[i, j] + B_shared[i, j]",
+            "C_local[i, j] = A_shared[i, j] * scale + bias",
+            "C_local[i, j] = T.max(A_shared[i, j], B_shared[i, j])"
+          ]
+        }
+      },
+      "reduce_operations": {
+        "T.reduce_sum": {
+          "purpose": "Reduce along specified dimension with sum",
+          "signature": "T.reduce_sum(A, result, dim=1)",
+          "example": "T.reduce_sum(A_local, A_sum, dim=1)"
+        },
+        "T.reduce_max": {
+          "purpose": "Reduce along specified dimension with max",
+          "signature": "T.reduce_max(A, result, dim=1, clear=False)",
+          "example": "T.reduce_max(A_local, A_max, dim=1)"
+        },
+        "warp_reduce": {
+          "functions": ["T.warp_reduce_sum", "T.warp_reduce_max"],
+          "purpose": "Warp-level reduction using shuffle instructions"
+        }
+      },
+      "math_functions": {
+        "built_in": {
+          "T.rsqrt": "Reciprocal square root",
+          "T.exp2": "Exponential base 2",
+          "T.max": "Maximum of two values",
+          "T.min": "Minimum of two values",
+          "T.infinity": "Infinity constant"
+        },
+        "manual_implementations": {
+          "sigmoid": "1.0 / (1.0 + T.exp(-x))",
+          "sigmoid_approx": "0.5 + 0.5 * T.tanh(x / 2)",
+          "softmax": "See Flash Attention example for online softmax"
+        }
+      },
+      "control_flow": {
+        "T.Pipelined": {
+          "purpose": "Software pipelining to overlap compute and memory transfer",
+          "signature": "T.Pipelined(n, num_stages=3, order=None, stage=None, group=None)",
+          "typical_usage": "for k in T.Pipelined(T.ceildiv(K, block_K), num_stages=3)",
+          "benefit": "Hide memory latency"
+        },
+        "T.Parallel": {
+          "purpose": "Parallel loop mapping to threads",
+          "signature": "T.Parallel(*extents, coalesced_width=None)",
+          "examples": [
+            "for i, j in T.Parallel(block_M, block_N)",
+            "for i in T.Parallel(N)"
+          ]
+        },
+        "T.Serial": {
+          "purpose": "Serial loop execution",
+          "example": "for i in T.Serial(n)"
+        },
+        "T.Unroll": {
+          "purpose": "Complete loop unrolling",
+          "example": "for i in T.Unroll(4)"
+        }
+      },
+      "kernel_launch": {
+        "T.Kernel": {
+          "purpose": "Define kernel launch configuration",
+          "signature": "T.Kernel(*grid_size, threads=128) as (bx, by, ...)",
+          "examples": [
+            "T.Kernel(T.ceildiv(M, block_M), threads=128) as bx",
+            "T.Kernel(T.ceildiv(N, block_N), T.ceildiv(M, block_M), threads=128) as (bx, by)"
+          ],
+          "note": "bx, by are block indices"
+        }
+      },
+      "advanced_features": {
+        "atomic_operations": {
+          "T.atomic_add": "Atomic addition for gradient accumulation",
+          "T.atomic_max": "Atomic maximum"
+        },
+        "conditional": {
+          "T.if_then_else": "Conditional execution: T.if_then_else(cond, true_val, false_val)"
+        },
+        "dynamic_shape": {
+          "T.dynamic": "Declare dynamic dimension: M = T.dynamic('m')"
+        }
+      }
+    },
+    "code_patterns": {
+      "kernel_template": "import tilelang\nimport tilelang.language as T\n\n@tilelang.jit(out_idx=[-1])\ndef my_kernel(M, N, ...):\n    @T.prim_func\n    def main(\n        A: T.Tensor((M, N), T.float16),\n        C: T.Tensor((M, N), T.float16),\n    ):\n        with T.Kernel(T.ceildiv(M, block_M), threads=128) as bx:\n            # Kernel logic\n            pass\n    return main",
+      "tiled_gemm": "with T.Kernel(T.ceildiv(N, block_N), T.ceildiv(M, block_M), threads=128) as (bx, by):\n    A_shared = T.alloc_shared((block_M, block_K), T.float16)\n    B_shared = T.alloc_shared((block_K, block_N), T.float16)\n    C_local = T.alloc_fragment((block_M, block_N), T.float32)\n    \n    T.clear(C_local)\n    \n    for k in T.Pipelined(T.ceildiv(K, block_K), num_stages=3):\n        T.copy(A[by * block_M, k * block_K], A_shared)\n        T.copy(B[k * block_K, bx * block_N], B_shared)\n        T.gemm(A_shared, B_shared, C_local)\n    \n    T.copy(C_local, C[by * block_M, bx * block_N])",
+      "rms_norm": "with T.Kernel(T.ceildiv(M, blk_m), threads=128) as bx:\n    A_shared = T.alloc_shared((blk_m, N), T.float)\n    A_local = T.alloc_fragment((blk_m, N), T.float)\n    A_powsum = T.alloc_fragment((blk_m,), T.float)\n    \n    T.copy(A[bx * blk_m : (bx + 1) * blk_m, :], A_shared)\n    T.copy(A_shared, A_local)\n    \n    # Compute squared sum\n    A_pow_local = T.alloc_fragment((blk_m, N), T.float)\n    for i, j in T.Parallel(blk_m, N):\n        A_pow_local[i, j] = A_local[i, j] * A_local[i, j]\n    \n    T.reduce_sum(A_pow_local, A_powsum, dim=1)\n    \n    # Normalize\n    for i in T.Parallel(blk_m):\n        A_powsum[i] = T.rsqrt(A_powsum[i] / N + 1e-12)\n    \n    for i, j in T.Parallel(blk_m, N):\n        A_local[i, j] *= A_powsum[i]",
+      "elementwise": "with T.Kernel(T.ceildiv(N, block_N), T.ceildiv(M, block_M), threads=128) as (bx, by):\n    A_shared = T.alloc_shared((block_M, block_N), T.float32)\n    B_shared = T.alloc_shared((block_M, block_N), T.float32)\n    C_local = T.alloc_fragment((block_M, block_N), T.float32)\n    \n    T.copy(A[by * block_M, bx * block_N], A_shared)\n    T.copy(B[by * block_M, bx * block_N], B_shared)\n    \n    for i, j in T.Parallel(block_M, block_N):\n        C_local[i, j] = A_shared[i, j] + B_shared[i, j]\n    \n    T.copy(C_local, C[by * block_M, bx * block_N])"
+    },
+    "data_types": {
+      "floating_point": ["T.float16", "T.bfloat16", "T.float32", "T.float64"],
+      "integer": ["T.int8", "T.int32"],
+      "type_conversion": "value_fp32 = value_fp16.astype(T.float32)"
+    },
+    "performance_optimization": {
+      "software_pipelining": "Use T.Pipelined with num_stages=2-4 to overlap memory transfer and compute",
+      "memory_coalescing": "T.copy() automatically optimizes, but ensure continuous memory access",
+      "shared_memory_reuse": "Reuse shared memory buffers for small-scale data",
+      "reduce_bank_conflict": "Use padding (e.g., 32 -> 33) to avoid bank conflicts",
+      "block_size_tuning": "Use autotuner: @tilelang.autotune(configs=get_configs())"
+    },
+    "testing_debugging": {
+      "profiler": "profiler = kernel.get_profiler(); latency = profiler.do_bench(warmup=500)",
+      "correctness_check": "profiler.assert_allclose(ref_program, rtol=0.01, atol=0.01)",
+      "cuda_source": "cuda_source = kernel.get_kernel_source(); print(cuda_source)"
+    },
+    "common_issues": {
+      "sigmoid_not_available": {
+        "workaround": "Implement manually: 1.0 / (1.0 + T.exp(-x))",
+        "alternative": "Use tanh approximation: 0.5 + 0.5 * T.tanh(x / 2)"
+      },
+      "small_config_performance": {
+        "solution": "Reduce block size, use naive implementation, avoid overusing shared memory"
+      },
+      "shared_memory_exceeded": {
+        "solution": "Reduce block size or use fewer shared memory buffers"
+      },
+      "type_mismatch": {
+        "solution": "Use .astype() to convert between types"
+      }
+    },
+    "comparison_with_tvm_te": {
+      "key_differences": [
+        "TileLang uses T.Kernel instead of te.create_schedule",
+        "TileLang uses T.copy instead of tensor slicing [:]",
+        "TileLang uses T.Parallel instead of implicit parallelization",
+        "TileLang uses explicit memory allocation (alloc_shared/alloc_fragment)",
+        "TileLang uses T.gemm for matrix multiplication instead of te.sum with slices"
+      ],
+      "migration_pattern": {
+        "te.compute": "Replace with T.Kernel + T.alloc_* + T.copy + manual loops",
+        "te.sum(tensor[:])": "Replace with T.reduce_sum() or manual accumulation in T.Parallel",
+        "tensor[:]": "Replace with T.copy() or explicit indexing",
+        "te.create_schedule": "Not needed in TileLang - use @tilelang.jit decorator"
+      }
+    },
+    "mhc_ops_specific": {
+      "forward_steps": [
+        "Reshape x: [B, S, n, D] -> [B, S, nD]",
+        "GEMM: h_mix = vecX @ phi.T",
+        "RMSNorm: inv_rms = rsqrt(mean(x^2) + eps)",
+        "Split h_mix into h_pre1, h_post1, h_res1",
+        "Apply alpha and bias",
+        "Sigmoid activation",
+        "Compute h_in = h_pre @ x"
+      ],
+      "backward_steps": [
+        "dh_pre = dh_in @ x^T",
+        "dh_pre2 = dh_pre * sigmoid_deriv",
+        "dalpha_pre, dbias_pre from dh_pre2",
+        "dvecX_inv from inv_rms, h_mix, dh_mix",
+        "dvecX_mm from dh_res",
+        "dx from dvecX_mm, dvecX_inv, dvecX_hin",
+        "dphi from dh_mix, x",
+        "dgamma from x, dvecX_mm"
+      ],
+      "recommended_block_sizes": {
+        "small": {"B": 2, "S": 64, "n": 4, "D": 128, "block_BS": 1, "block_nD": 32},
+        "medium": {"B": 2, "S": 256, "n": 4, "D": 256, "block_BS": 8, "block_nD": 64},
+        "large": {"B": 1, "S": 1024, "n": 4, "D": 512, "block_BS": 32, "block_nD": 128}
+      }
+    },
+    "reference_links": {
+      "github_repo": "https://github.com/tile-ai/tilelang",
+      "quickstart": "examples/quickstart.py",
+      "gemm_example": "examples/gemm/example_gemm.py",
+      "rms_norm_example": "examples/norm/rms_norm.py",
+      "flash_attention": "examples/flash_attention/example_mha_fwd_bshd_wgmma_pipelined.py",
+      "elementwise": "examples/elementwise/example_elementwise_add.py",
+      "api_init": "tilelang/language/__init__.py"
+    },
+    "implementation_notes": {
+      "estimated_effort": "16-32 hours",
+      "phases": [
+        "Forward Naive Implementation (4-6h)",
+        "Forward Optimization (4-8h)",
+        "Forward Testing (2-4h)",
+        "Backward Implementation (8-12h)",
+        "Backward Testing (4-6h)",
+        "Performance Tuning (4-8h)"
+      ],
+      "risks": [
+        "Sigmoid function might need manual implementation",
+        "Small configuration performance may be suboptimal",
+        "Compilation/runtime errors may occur",
+        "Performance may not match Triton"
+      ],
+      "decision_points": [
+        "Is cross-platform support really needed?",
+        "What are the performance requirements?",
+        "What is the maintenance cost tolerance?",
+        "Are there higher priority tasks?"
+      ]
+    }
+  }
+}

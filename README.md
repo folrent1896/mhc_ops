@@ -458,9 +458,20 @@ conda run -n mhc_ops python test/backward/test_backward.py
 
 ## 文档
 
+### 用户指南
 - **[QUICKSTART.md](QUICKSTART.md)** - 5分钟快速上手
 - **[BACKWARD.md](BACKWARD.md)** - Backward 算子详细文档
 - **[PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md)** - 项目结构说明
+
+### TileLang 相关
+- **[TILELANG_STATUS.md](docs/TILELANG_STATUS.md)** - TileLang 实现状态总结
+- **[TILELANG_BACKWARD_ISSUES.md](docs/TILELANG_BACKWARD_ISSUES.md)** - TileLang Backward 详细问题分析
+- **[TILELANG_REWRITE_PLAN.md](docs/TILELANG_REWRITE_PLAN.md)** - TileLang 原生 API 重写计划
+- **[TILELANG_API_CHEATSHEET.md](docs/TILELANG_API_CHEATSHEET.md)** - TileLang API 速查表
+- **[tilelang_knowledge_memory.json](docs/tilelang_knowledge_memory.json)** - TileLang 知识库（结构化 JSON）
+
+### Bug 修复日志
+- **[BUGFIX_LOG.md](BUGFIX_LOG.md)** - 问题修复记录
 
 ---
 
