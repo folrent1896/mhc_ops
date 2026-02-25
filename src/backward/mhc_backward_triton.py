@@ -609,7 +609,9 @@ def mhc_backward_triton(
         # ============================================================
         # Kernel 2: Compute dx
         # ============================================================
-        grid2 = (B * S, triton.cdiv(n, BLOCK_SIZE_N))
+        # FIXED: grid2 should be (B*S, n) to cover all n_idx values
+        # Previous grid: (B*S, 1) only processed n_idx=0
+        grid2 = (B * S, n)
 
         mhc_backward_dx_kernel[grid2](
             dvecX_mm_ptr=dvecX_mm,
