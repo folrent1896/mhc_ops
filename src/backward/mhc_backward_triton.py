@@ -519,8 +519,8 @@ def mhc_backward_triton(
     dvecX_mm = torch.zeros(B, S, nD, dtype=torch.float32, device=x.device)
     dvecX_inv = torch.zeros(B, S, n, D, dtype=torch.float32, device=x.device)
 
-    # Also need dh_mix for dphi computation
-    # Compute dh_mix from components
+    # Also need dh_mix for dphi computation (kernel 3)
+    # NOTE: This is the gradient dh_mix, NOT the forward h_mix!
     a_pre, a_post, a_res = alpha[0], alpha[1], alpha[2]
     x_fp = x.float()
 
@@ -537,11 +537,14 @@ def mhc_backward_triton(
     dh_post1 = a_post * dh_post2
     dh_res1 = a_res * dh_res
 
+    # This is dh_mix for dphi kernel (already has inv_rms applied)
     dh_mix = torch.cat([dh_pre1, dh_post1, dh_res1.reshape(B, S, n * n)], dim=-1) * inv_rms[:, :, None]
 
     # Block sizes
+    # BLOCK_SIZE_N: for n dimension (h_pre, h_post, etc.)
+    # BLOCK_SIZE_K: for D dimension (x, dh_in, etc.) - must be >= D!
     BLOCK_SIZE_N = triton.next_power_of_2(n)
-    BLOCK_SIZE_K = triton.next_power_of_2(min(D, nD, out_features))
+    BLOCK_SIZE_K = triton.next_power_of_2(D)  # FIX: Use D, not min(D, nD, out_features)
 
     # ============================================================
     # Kernel 1: Main backward (dalpha, dbias, dvecX_mm)
@@ -555,7 +558,7 @@ def mhc_backward_triton(
             alpha_ptr=alpha,
             bias_ptr=bias,
             inv_rms_ptr=inv_rms,
-            h_mix_ptr=h_mix,
+            h_mix_ptr=h_mix,  # Use forward h_mix, not dh_mix!
             h_pre_ptr=h_pre,
             h_post_ptr=h_post,
             dh_in_ptr=dh_in,
@@ -609,6 +612,10 @@ def mhc_backward_triton(
             BLOCK_SIZE_K=BLOCK_SIZE_K,
         )
 
+        # DEBUG: Check dalpha after kernel 1 (disabled)
+        # torch.cuda.synchronize()
+        # print(f"[DEBUG] After kernel 1, dalpha = {dalpha.cpu().numpy()}")
+
         # ============================================================
         # Kernel 2: Compute dx
         # ============================================================
@@ -659,6 +666,14 @@ def mhc_backward_triton(
         # ============================================================
         grid3 = (out_features, triton.cdiv(nD, BLOCK_SIZE_K))
 
+        # torch.cuda.synchronize()
+        # print(f"[DEBUG] After kernel 2 (dx), dalpha = {dalpha.cpu().numpy()}")
+
+        # ============================================================
+        # Kernel 3: Compute dphi
+        # ============================================================
+        grid3 = (out_features, triton.cdiv(nD, BLOCK_SIZE_K))
+
         mhc_backward_dphi_kernel[grid3](
             dh_mix_ptr=dh_mix,
             x_ptr=x,
@@ -687,6 +702,9 @@ def mhc_backward_triton(
             BLOCK_SIZE_K=BLOCK_SIZE_K,
         )
 
+        # torch.cuda.synchronize()
+        # print(f"[DEBUG] After kernel 3 (dphi), dalpha = {dalpha.cpu().numpy()}")
+
         # ============================================================
         # Kernel 4: Compute dgamma
         # ============================================================
@@ -712,5 +730,8 @@ def mhc_backward_triton(
             BLOCK_SIZE_N=BLOCK_SIZE_N,
             BLOCK_SIZE_K=BLOCK_SIZE_K,
         )
+
+    # DEBUG: Check final dalpha before returning
+    # print(f"[DEBUG] Final dalpha[0] = {dalpha[0]:.8f}")
 
     return dx, dphi, dalpha, dbias, dgamma

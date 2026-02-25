@@ -685,3 +685,93 @@ This suggests a systematic issue affecting dh_pre/dh_pre1 related computations, 
 **Date**: 2025-02-25 (Session 3)
 **Total Project Duration**: 3 sessions, ~10 hours
 **Status**: Multi-kernel architecture working, dphi perfect, other components partially correct
+
+---
+
+## Session 4: BLOCK_SIZE_K Bug Fix (2025-02-25)
+
+### Problem: dalpha_pre Incorrect (95% Error)
+
+**Symptoms**:
+- dalpha_pre error: ~1.13 (30% relative error)
+- dalpha_post, dalpha_res: correct (error < 1e-6)
+- Isolated kernel test: passed (error < 1e-6)
+
+**Root Cause**: BLOCK_SIZE_K Too Small
+
+In `src/backward/mhc_backward_triton.py` line 545:
+```python
+# BUG: BLOCK_SIZE_K set to minimum of dimensions
+BLOCK_SIZE_K = triton.next_power_of_2(min(D, nD, out_features))
+```
+
+For configuration (B=2, S=64, n=4, D=128):
+- D = 128
+- min(D, nD, out_features) = 24
+- BLOCK_SIZE_K = 32
+
+But loading x_block [n, D] = [4, 128] requires BLOCK_SIZE_K >= 128!
+
+**Impact**:
+- Only loaded first 32 elements of D dimension
+- Remaining 96 elements set to 0.0
+- dh_pre computation incomplete
+- All dependent computations wrong (dalpha, dbias, dx, dgamma)
+
+**Fix**:
+```python
+# Line 545: Use D instead of min(D, nD, out_features)
+BLOCK_SIZE_K = triton.next_power_of_2(D)
+```
+
+**Results After Fix**:
+| Component | Before | After | Status |
+|-----------|--------|-------|--------|
+| dalpha[0] | 1.12944 | 0.00000048 | ✅ PASS |
+| dalpha[1] | 0.00000007 | 0.00000042 | ✅ PASS |
+| dalpha[2] | 0.000122 | 0.000488 | ✅ PASS |
+
+**Debugging Process**:
+1. Created isolated kernel test → passed
+2. Verified dh_pre2 computation → correct
+3. Verified h_pre1_hmix loading → correct
+4. Compared CPU vs GPU values → identical
+5. Noticed BLOCK_SIZE_K calculation using `min()`
+6. Realized x_block [n, D] needs full D dimension
+7. Fixed BLOCK_SIZE_K calculation
+
+**Lessons Learned**:
+1. **BLOCK_SIZE must be >= data dimension being loaded**
+   - Mask prevents out-of-bounds access but doesn't load missing data
+   - Always verify BLOCK_SIZE against actual tensor dimensions
+
+2. **Use `triton.next_power_of_2(dimension)` not `min(dim1, dim2, ...)`**
+   - Each tensor dimension has its own size requirement
+   - Different operations may need different block sizes
+
+3. **Isolation testing is effective**
+   - Isolated kernel passed → bug in full implementation
+   - Component verification → computation logic correct
+   - Pointed to data loading issue
+
+**Remaining Issues**:
+- dx: max_err=45.25 (needs investigation)
+- dbias: max_err=1.35 (needs investigation)  
+- dgamma: max_err=6.53 (needs investigation)
+
+These may also be related to BLOCK_SIZE settings or memory access patterns.
+
+**Files Modified**:
+- `src/backward/mhc_backward_triton.py`: Line 545 (BLOCK_SIZE_K calculation)
+- `docs/DEBUG_RESULT.md`: Updated with fix details
+- Multiple debug test scripts created during investigation
+
+**Test Commands**:
+```bash
+# Quick verification
+conda run -n mhc_ops python test/debug_simple_backward.py
+
+# Full test
+conda run -n mhc_ops python test/backward/test_backward.py
+```
+
